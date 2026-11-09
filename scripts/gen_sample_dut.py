@@ -66,11 +66,18 @@ def classify_m1(layout: pya.Layout, cell: pya.Cell, w: float) -> dict[str, pya.D
     strips = sorted((b for b in boxes if b not in gate), key=lambda b: b.left)
     if len(gate) != 1 or len(strips) != 3:
         raise click.ClickException(f"Unexpected Metal1 structure in {cell.name}")
-    return {"gate": gate[0], "source": strips[0], "drain": strips[1], "tap": strips[2]}
+    # The bulk tap is butted to the right S/D diffusion, so that S/D must be the source.
+    return {"gate": gate[0], "drain": strips[0], "source": strips[1], "tap": strips[2]}
+
+
+def placement(origin: tuple[float, float]) -> pya.DTrans:
+    # Mirror in x so the drain faces pin Q and the tap/source face pin A;
+    # the drain riser then does not cross the gate route.
+    return pya.DTrans(pya.DTrans.M90, pya.DVector(*origin))
 
 
 def moved(box: pya.DBox, origin: tuple[float, float]) -> pya.DBox:
-    return box.moved(origin[0], origin[1])
+    return placement(origin) * box
 
 
 @click.command()
@@ -103,8 +110,8 @@ def main(dut_num: str, csv_path: Path, base_gds: Path, pdk_root: Path, out_dir: 
     ncell = draw_device(layout, pdk_macros, "nfet", row["N_MODEL"], n_w, n_l)
     pm = {k: moved(b, PMOS_ORIGIN) for k, b in classify_m1(layout, pcell, p_w).items()}
     nm = {k: moved(b, NMOS_ORIGIN) for k, b in classify_m1(layout, ncell, n_w).items()}
-    top.insert(pya.DCellInstArray(pcell.cell_index(), pya.DTrans(*PMOS_ORIGIN)))
-    top.insert(pya.DCellInstArray(ncell.cell_index(), pya.DTrans(*NMOS_ORIGIN)))
+    top.insert(pya.DCellInstArray(pcell.cell_index(), placement(PMOS_ORIGIN)))
+    top.insert(pya.DCellInstArray(ncell.cell_index(), placement(NMOS_ORIGIN)))
 
     m1 = top.shapes(layout.layer(*M1))
     # Source and bulk tap to the supply rails
